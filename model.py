@@ -649,3 +649,17 @@ class SelectionModel:
         # Normalize and project to vocabulary logits.
         return self.head(rms_norm(x))
 
+# Step 17 - masked_cross_entropy
+def masked_cross_entropy(logits, targets):
+    # Compute log probabilities over the vocabulary dimension.
+    log_probs = logits.log_softmax(axis=-1)
+
+    # Only answer positions contribute because targets are all zeros
+    # at positions that should be ignored.
+    negative_log_likelihood = -(targets * log_probs).sum()
+
+    # Normalize by the total number of answer positions.
+    n_answers = targets.sum()
+
+    return negative_log_likelihood / n_answers
+
