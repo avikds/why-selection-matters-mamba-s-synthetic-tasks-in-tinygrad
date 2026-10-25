@@ -31,6 +31,7 @@ python scaffold.py
 - [x] **19.** evaluate
 - [x] **20.** selective_copying_study
 - [x] **21.** induction_extrapolation
+- [x] **22.** delta_profile
 
 ---
 

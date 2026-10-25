@@ -902,3 +902,75 @@ def induction_extrapolation(
 
     return acc, models
 
+# Step 22 - delta_profile
+def delta_profile(model, x, trigger):
+    # This analysis is defined only for the selective S6 model.
+    if model.kind != "s6":
+        raise ValueError("delta_profile requires a model with kind='s6'")
+
+    # Convert the input sequences to a NumPy array.
+    x = np.asarray(x)
+
+    # Identify every trigger occurrence in each sequence.
+    trigger_mask = x == trigger
+
+    # Mark the position immediately after the first trigger in each row.
+    value_mask = np.zeros(x.shape, dtype=bool)
+
+    for i in range(x.shape[0]):
+        positions = np.flatnonzero(trigger_mask[i])
+
+        if positions.size > 0:
+            value_pos = positions[0] + 1
+            if value_pos < x.shape[1]:
+                value_mask[i, value_pos] = True
+
+    # Every remaining position belongs to the "other" category.
+    other_mask = ~(trigger_mask | value_mask)
+
+    # Encode the input tokens as one-hot vectors.
+    inputs, _ = encode_batch(
+        x,
+        x,
+        np.zeros(x.shape, dtype=bool),
+        model.vocab,
+    )
+
+    # Initialize the model's hidden representation from token embeddings.
+    h = Tensor(inputs) @ model.embed
+
+    profiles = []
+
+    # Inspect the input-dependent step sizes in each S6 layer.
+    for block in model.blocks:
+        # Reproduce the SSM input path from MixerBlock:
+        # RMSNorm -> input projection -> SiLU.
+        u = block.in_proj(rms_norm(h))
+        u = u * u.sigmoid()
+
+        # Selection returns delta with shape (batch, L, d_inner).
+        # Average across channels to obtain one value per position.
+        delta = block.mixer.selection(u)[0]
+        delta = delta.mean(axis=-1).numpy()
+
+        # Calculate the mean step size for each position category.
+        layer_profile = {}
+
+        for name, mask in (
+            ("trigger", trigger_mask),
+            ("value", value_mask),
+            ("other", other_mask),
+        ):
+            selected = delta[mask]
+
+            # Return 0.0 when a category has no positions.
+            mean_delta = float(selected.mean()) if selected.size else 0.0
+            layer_profile[name] = round(mean_delta, 4)
+
+        profiles.append(layer_profile)
+
+        # Advance the hidden representation for analysis of the next layer.
+        h = block(h)
+
+    return profiles
+
