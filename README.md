@@ -18,6 +18,7 @@ python scaffold.py
 - [x] **6.** scan_combine
 - [x] **7.** associative_scan
 - [x] **8.** Dense
+- [x] **9.** ssm_init
 
 ---
 

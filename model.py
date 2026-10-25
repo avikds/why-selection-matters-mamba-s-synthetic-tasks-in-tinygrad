@@ -238,3 +238,38 @@ class Dense:
 
         return out
 
+# Step 9 - ssm_init
+def ssm_init(rng, d_inner, d_state, dt_min=0.001, dt_max=0.1):
+    # S4D-Real initialization:
+    # A_n = -(n + 1), stored as log(n + 1) so A = -exp(A_log).
+    # Use the same sequence of values for every inner channel.
+    A_log = np.broadcast_to(
+        np.log(np.arange(1, d_state + 1, dtype=np.float32)),
+        (d_inner, d_state),
+    ).copy().astype(np.float32)
+
+    # Draw positive step sizes from a log-uniform distribution.
+    # This is the only random draw in this initializer.
+    dt = np.exp(
+        rng.uniform(
+            math.log(dt_min),
+            math.log(dt_max),
+            size=d_inner,
+        )
+    )
+
+    # Apply the inverse softplus so softplus(dt_bias) approximately
+    # recovers the sampled step sizes:
+    # inverse_softplus(dt) = dt + log(1 - exp(-dt)).
+    dt_bias = dt + np.log(-np.expm1(-dt))
+    dt_bias = dt_bias.astype(np.float32)
+
+    # D is the learnable skip-connection parameter, initialized to ones.
+    D = np.ones((d_inner,), dtype=np.float32)
+
+    return {
+        "A_log": A_log,
+        "dt_bias": dt_bias,
+        "D": D,
+    }
+
