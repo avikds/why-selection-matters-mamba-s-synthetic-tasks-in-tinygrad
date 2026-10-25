@@ -209,3 +209,32 @@ def associative_scan(a, b):
     # b now contains every state h_t, with h_(-1) = 0.
     return b
 
+# Step 8 - Dense
+class Dense:
+    def __init__(self, d_in, d_out, rng, bias=True):
+        # Use a fan-in-scaled uniform initialization for stable training.
+        bound = 1.0 / math.sqrt(d_in)
+
+        # Initialize weights with shape (d_in, d_out) and dtype float32.
+        self.weight = Tensor(
+            rng.uniform(-bound, bound, size=(d_in, d_out)).astype(np.float32)
+        )
+
+        # Initialize the bias with shape (d_out,) when requested.
+        if bias:
+            self.bias = Tensor(
+                rng.uniform(-bound, bound, size=(d_out,)).astype(np.float32)
+            )
+        else:
+            self.bias = None
+
+    def __call__(self, x):
+        # Apply the linear transformation without transposing the weights.
+        out = x @ self.weight
+
+        # Add the bias when this layer was configured to use one.
+        if self.bias is not None:
+            out = out + self.bias
+
+        return out
+
