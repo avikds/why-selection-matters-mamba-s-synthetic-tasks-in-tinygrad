@@ -165,3 +165,47 @@ def scan_combine(left, right):
     # Python scalars, NumPy arrays, and tinygrad Tensors.
     return a1 * a2, a2 * b1 + b2
 
+# Step 7 - associative_scan
+import math
+from tinygrad import Tensor
+
+
+def associative_scan(a, b):
+    # Time is along axis 1.
+    seq_len = a.shape[1]
+    d = 1
+
+    # Hillis-Steele scan: double the distance at each level,
+    # giving logarithmic scan depth.
+    while d < seq_len:
+        # Shift a right by d positions, padding with the identity
+        # multiplier 1.0 at the beginning.
+        a_prev = Tensor.cat(
+            a[:, :d] * 0.0 + 1.0,
+            a[:, :-d],
+            dim=1,
+        )
+
+        # Shift b right by d positions, padding with 0.0.
+        b_prev = Tensor.cat(
+            b[:, :d] * 0.0,
+            b[:, :-d],
+            dim=1,
+        )
+
+        # Compose the earlier affine pair with the current pair:
+        # a_new[t] = a_prev[t] * a[t]
+        # b_new[t] = a[t] * b_prev[t] + b[t]
+        #
+        # Keep the current a and b unchanged until both updates
+        # have been computed.
+        a_new = (a_prev * a).contiguous()
+        b_new = (a * b_prev + b).contiguous()
+
+        # Advance to the next scan level.
+        a, b = a_new, b_new
+        d *= 2
+
+    # b now contains every state h_t, with h_(-1) = 0.
+    return b
+
