@@ -37,6 +37,36 @@ python scaffold.py
 - [x] **25.** cache_bytes
 - [x] **26.** selection_report
 
----
+## Results
 
-Built on Deep-ML.
+```
+1. Selective Copying (16 noise positions, 4 tokens to copy from 16 symbols; chance 0.0625)
+   LTI diagonal SSM (S4D-Real)    answer accuracy 0.372
+   selective SSM (S6)             answer accuracy 0.751
+   causal attention               answer accuracy 0.870
+   Same block, width, data and 300 Adam steps: the time-invariant model is far behind.
+   Over seeds 0-2 at this budget: LTI 0.37-0.38, S6 0.62-0.88, attention 0.83-0.90.
+
+2. Induction Heads, trained at length 20, tested at 1x / 2x / 4x / 8x (chance 0.0625)
+   selective SSM (S6)             1x 0.953  2x 0.927  4x 0.812  8x 0.396
+   attention + learned positions  1x 0.857  2x 0.419  4x 0.229  8x 0.161
+   S6 stays above 0.8 to 4x; attention breaks where its position table was never trained.
+   Over seeds 0-2: S6 0.82-1.0 at 2x, 0.83-0.91 at 4x, 0.25-0.63 at 8x; attention 0.36-0.50, 0.16-0.27, 0.11-0.19.
+
+3. Where the trained S6 writes (mean step size delta by position class)
+   layer 1: trigger 0.0814  value 0.0247  other 0.0248
+   layer 2: trigger 0.0360  value 0.0989  other 0.0268
+   The second layer steps 3.7x harder on the value right after the trigger than on noise (3.7x-8.9x over seeds 0-2).
+
+4. Recurrent inference
+   token-by-token decoding vs parallel scan: max |logit difference| = 1.03e-05
+   recurrent state for 8 sequences: 8192 floats, the same at any length
+       20 tokens: S6 state     4096 bytes | attention KV cache     10240 bytes
+       40 tokens: S6 state     4096 bytes | attention KV cache     20480 bytes
+       80 tokens: S6 state     4096 bytes | attention KV cache     40960 bytes
+      160 tokens: S6 state     4096 bytes | attention KV cache     81920 bytes
+     1280 tokens: S6 state     4096 bytes | attention KV cache    655360 bytes
+    10240 tokens: S6 state     4096 bytes | attention KV cache   5242880 bytes
+
+study finished in 207 s
+```
