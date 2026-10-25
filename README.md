@@ -22,6 +22,7 @@ python scaffold.py
 - [x] **10.** discretize
 - [x] **11.** LTISSM
 - [x] **12.** lti_kernel
+- [x] **13.** S6
 
 ---
 

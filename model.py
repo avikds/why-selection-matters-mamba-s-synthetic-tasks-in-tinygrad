@@ -408,3 +408,83 @@ def lti_conv(ssm, x):
 
     return y
 
+# Step 13 - S6
+class S6:
+    def __init__(self, d, n, dt_rank, rng, dt_min=0.001, dt_max=0.1):
+        # Initialize the SSM parameters first, preserving the specified RNG draw order.
+        p = ssm_init(rng, d, n, dt_min, dt_max)
+
+        # Project each input token into:
+        # dt_rank components for the step-size projection,
+        # n components for the input-dependent B,
+        # n components for the input-dependent C.
+        self.x_proj = Dense(d, dt_rank + 2 * n, rng, bias=False)
+
+        # Map the low-rank step-size representation to d channels.
+        self.dt_proj = Dense(dt_rank, d, rng)
+
+        # Replace the randomly initialized bias with the SSM step-size bias.
+        self.dt_proj.bias = Tensor(p["dt_bias"])
+
+        # Store the continuous-time dynamics and skip connection.
+        self.A_log = Tensor(p["A_log"])
+        self.D = Tensor(p["D"])
+
+        self.d = d
+        self.n = n
+        self.dt_rank = dt_rank
+
+    def selection(self, x):
+        # Project the input sequence.
+        projected = self.x_proj(x)
+
+        # Split the projection into step-size, input, and readout components.
+        dt_part = projected[..., :self.dt_rank]
+        Bt = projected[..., self.dt_rank:self.dt_rank + self.n]
+        Ct = projected[..., self.dt_rank + self.n:]
+
+        # Produce positive, input-dependent step sizes.
+        # Shape: (batch, L, d).
+        delta = self.dt_proj(dt_part).softplus()
+
+        # Bt and Ct have shape (batch, L, n) and are shared across channels.
+        return delta, Bt, Ct
+
+    def __call__(self, x):
+        # Input x has shape (batch, L, d).
+        batch, seq_len, d = x.shape
+
+        # Compute the input-dependent SSM parameters.
+        delta, Bt, Ct = self.selection(x)
+
+        # Recover the continuous-time diagonal state matrix.
+        # Shape: (d, n).
+        A = -self.A_log.exp()
+
+        # Euler discretization, broadcasting across batch, time,
+        # channel, and state dimensions.
+        # delta[..., None]: (batch, L, d, 1)
+        # Bt[:, :, None, :]: (batch, L, 1, n)
+        # a_bar and b_bar: (batch, L, d, n)
+        a_bar, b_bar = discretize(
+            delta[..., None],
+            A,
+            Bt[:, :, None, :],
+            method="euler",
+        )
+
+        # Construct the input-dependent recurrence:
+        # h_t = a_bar_t * h_(t-1) + b_bar_t * x_t,
+        # with the initial state h_(-1) = 0.
+        b = b_bar * x[..., None]
+
+        # Compute all recurrent states using the differentiable
+        # Hillis-Steele associative scan from Part 2.
+        h = associative_scan(a_bar, b)
+
+        # Input-dependent readout followed by the skip connection:
+        # y_t = sum_n(C_t,n * h_t,d,n) + D * x_t.
+        y = (h * Ct[:, :, None, :]).sum(axis=-1) + self.D * x
+
+        return y
+
