@@ -14,6 +14,7 @@ python scaffold.py
 - [x] **2.** induction_heads_batch
 - [x] **3.** encode_batch
 - [x] **4.** masked_accuracy
+- [x] **5.** scan_reference
 
 ---
 

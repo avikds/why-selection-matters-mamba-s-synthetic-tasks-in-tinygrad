@@ -123,3 +123,25 @@ def masked_accuracy(logits, y, mask):
     # as a standard Python float.
     return float(np.mean(correct))
 
+# Step 5 - scan_reference
+def scan_reference(a, b):
+    # Convert inputs to float64 to ensure the recurrence and output
+    # use the required precision.
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+
+    # Initialize the hidden state to zero for every batch item and
+    # every trailing dimension, excluding the time axis (axis 1).
+    h = np.zeros(a.shape[:1] + a.shape[2:], dtype=np.float64)
+
+    # Allocate the output array to store every hidden state.
+    out = np.empty(a.shape, dtype=np.float64)
+
+    # Sequentially evaluate h_t = a_t * h_(t-1) + b_t.
+    # Broadcasting handles all dimensions other than the time axis.
+    for t in range(a.shape[1]):
+        h = a[:, t, ...] * h + b[:, t, ...]
+        out[:, t, ...] = h
+
+    return out
+
