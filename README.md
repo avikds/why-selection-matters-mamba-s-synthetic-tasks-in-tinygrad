@@ -29,6 +29,7 @@ python scaffold.py
 - [x] **17.** masked_cross_entropy
 - [x] **18.** train_model
 - [x] **19.** evaluate
+- [x] **20.** selective_copying_study
 
 ---
 

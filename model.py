@@ -740,3 +740,79 @@ def evaluate(model, x, y, mask, vocab, chunk=64):
     # Return answer-position accuracy as a Python float.
     return float(correct / total) if total > 0 else 0.0
 
+# Step 20 - selective_copying_study
+STUDY_VOCAB = 18
+STUDY_MAX_LEN = 160
+
+
+def selective_copying_study(
+    kinds=("lti", "s6", "attn"),
+    seeds=(0,),
+    steps=300,
+    batch_size=64,
+    lr=3e-3,
+    n_ctx=16,
+    n_data=4,
+    n_vocab=16,
+    d_model=32,
+    n_eval=256,
+):
+    # Store evaluation accuracies and trained models for each mixer.
+    acc = {kind: [] for kind in kinds}
+    models = {kind: [] for kind in kinds}
+
+    # Preserve the required iteration order: mixer kind, then seed.
+    for kind in kinds:
+        for seed in seeds:
+            # Use the shared vocabulary and maximum sequence length
+            # for every model in this experiment.
+            model = SelectionModel(
+                vocab=STUDY_VOCAB,
+                d_model=d_model,
+                n_layers=2,
+                kind=kind,
+                seed=seed,
+                max_len=STUDY_MAX_LEN,
+            )
+
+            # Generate Selective Copying batches using the supplied seed.
+            def make(n, s):
+                return selective_copying_batch(
+                    n,
+                    s,
+                    n_ctx=n_ctx,
+                    n_data=n_data,
+                    n_vocab=n_vocab,
+                )
+
+            # Train every model with the same training budget.
+            train_model(
+                model,
+                make,
+                STUDY_VOCAB,
+                steps=steps,
+                lr=lr,
+                batch_size=batch_size,
+                seed=seed,
+            )
+
+            # Generate a separate, reproducible held-out evaluation set.
+            x_eval, y_eval, mask_eval = make(
+                n_eval,
+                10**7 + seed,
+            )
+
+            # Measure accuracy only at answer positions.
+            score = evaluate(
+                model,
+                x_eval,
+                y_eval,
+                mask_eval,
+                STUDY_VOCAB,
+            )
+
+            acc[kind].append(round(float(score), 4))
+            models[kind].append(model)
+
+    return acc, models
+
