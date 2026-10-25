@@ -492,6 +492,7 @@ class S6:
         return y
 
 # Step 14 - CausalSelfAttention
+# Step 14 - CausalSelfAttention
 class CausalSelfAttention:
     def __init__(self, d, rng):
         # Initialize query, key, value, and output projections in the
@@ -516,13 +517,12 @@ class CausalSelfAttention:
         # scores[b, i, j] = q[b, i] dot k[b, j] / sqrt(d).
         scores = (q @ k.transpose(1, 2)) / math.sqrt(self.d)
 
-        # Construct a causal keep mask: position j can attend to
-        # position i only when j <= i. The lower triangle includes
-        # the diagonal, so each position can attend to itself.
-        keep = Tensor.ones((L, L)).tril()
+        # Boolean causal mask: position i can attend only to positions j <= i.
+        # The comparison produces a Boolean tensor, as required by where().
+        positions = Tensor.arange(L)
+        keep = positions.reshape(1, L) <= positions.reshape(L, 1)
 
-        # Replace scores at future positions with a large negative
-        # number so their softmax probabilities become approximately zero.
+        # Mask future positions so their softmax probabilities approach zero.
         scores = keep.where(scores, -1e9)
 
         # Normalize attention scores over the key-position axis.
