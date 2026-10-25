@@ -816,3 +816,89 @@ def selective_copying_study(
 
     return acc, models
 
+# Step 21 - induction_extrapolation
+STUDY_VOCAB = 18
+STUDY_MAX_LEN = 160
+
+
+def induction_extrapolation(
+    kinds=("s6", "attn"),
+    seeds=(0,),
+    steps=300,
+    batch_size=64,
+    lr=3e-3,
+    train_len=20,
+    mults=(1, 2, 4, 8),
+    n_vocab=16,
+    d_model=32,
+    n_eval=128,
+):
+    # Store accuracy lists indexed by mixer kind and length multiplier.
+    acc = {
+        kind: {int(m): [] for m in mults}
+        for kind in kinds
+    }
+    models = {kind: [] for kind in kinds}
+
+    # Allocate enough positions for the longest evaluation sequence.
+    max_eval_len = train_len * max(mults, default=1)
+    max_len = max(STUDY_MAX_LEN, max_eval_len)
+
+    # Train each mixer at the same sequence length and training budget.
+    for kind in kinds:
+        for seed in seeds:
+            model = SelectionModel(
+                STUDY_VOCAB,
+                d_model,
+                2,
+                kind,
+                seed,
+                max_len=max_len,
+            )
+
+            # The model is trained only on sequences of length train_len.
+            def make(n, s):
+                return induction_heads_batch(
+                    n,
+                    s,
+                    seq_len=train_len,
+                    n_vocab=n_vocab,
+                )
+
+            train_model(
+                model,
+                make,
+                STUDY_VOCAB,
+                steps=steps,
+                lr=lr,
+                batch_size=batch_size,
+                seed=seed,
+            )
+
+            # Preserve each trained model for subsequent analysis.
+            models[kind].append(model)
+
+            # Test generalization at each requested length multiplier.
+            for m in mults:
+                eval_len = train_len * m
+
+                x_eval, y_eval, mask_eval = induction_heads_batch(
+                    n_eval,
+                    10**7 + seed,
+                    seq_len=eval_len,
+                    n_vocab=n_vocab,
+                )
+
+                score = evaluate(
+                    model,
+                    x_eval,
+                    y_eval,
+                    mask_eval,
+                    STUDY_VOCAB,
+                )
+
+                # Store accuracy rounded to four decimal places.
+                acc[kind][int(m)].append(round(float(score), 4))
+
+    return acc, models
+

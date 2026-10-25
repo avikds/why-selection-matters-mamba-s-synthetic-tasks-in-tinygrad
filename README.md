@@ -30,6 +30,7 @@ python scaffold.py
 - [x] **18.** train_model
 - [x] **19.** evaluate
 - [x] **20.** selective_copying_study
+- [x] **21.** induction_extrapolation
 
 ---
 
