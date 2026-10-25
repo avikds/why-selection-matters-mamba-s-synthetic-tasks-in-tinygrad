@@ -588,3 +588,64 @@ class MixerBlock:
         # Attention operates directly at the model dimension.
         return x + self.mixer(x_norm)
 
+# Step 16 - SelectionModel
+class SelectionModel:
+    def __init__(
+        self,
+        vocab,
+        d_model,
+        n_layers,
+        kind,
+        seed,
+        max_len=256,
+        d_state=8,
+        expand=2,
+        dt_rank=4,
+    ):
+        # Initialize the seeded NumPy random number generator.
+        rng = np.random.default_rng(seed)
+
+        self.kind = kind
+        self.vocab = vocab
+
+        # Token embedding table: (vocab, d_model), float32.
+        self.embed = Tensor(
+            rng.normal(0.0, 1.0, size=(vocab, d_model)).astype(np.float32)
+        )
+
+        # Learned absolute positional embeddings are used only by attention.
+        if kind == "attn":
+            self.pos = Tensor(
+                rng.normal(
+                    0.0, 0.02, size=(max_len, d_model)
+                ).astype(np.float32)
+            )
+        else:
+            self.pos = None
+
+        # Construct the mixer blocks in order, sharing the seeded generator.
+        self.blocks = [
+            MixerBlock(d_model, kind, rng, d_state, expand, dt_rank)
+            for _ in range(n_layers)
+        ]
+
+        # Output projection from model dimension to vocabulary logits.
+        self.head = Dense(d_model, vocab, rng)
+
+    def __call__(self, inputs):
+        # Convert one-hot token inputs to model representations.
+        # inputs: (batch, L, vocab)
+        x = inputs @ self.embed
+
+        # Add learned absolute positional embeddings for attention only.
+        if self.pos is not None:
+            L = inputs.shape[1]
+            x = x + self.pos[:L]
+
+        # Apply each sequence-mixing residual block.
+        for block in self.blocks:
+            x = block(x)
+
+        # Normalize and project to vocabulary logits.
+        return self.head(rms_norm(x))
+

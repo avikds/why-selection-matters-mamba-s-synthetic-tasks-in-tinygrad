@@ -25,6 +25,7 @@ python scaffold.py
 - [x] **13.** S6
 - [x] **14.** CausalSelfAttention
 - [x] **15.** MixerBlock
+- [x] **16.** SelectionModel
 
 ---
 
