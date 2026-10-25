@@ -361,3 +361,50 @@ class LTISSM:
 
         return y
 
+# Step 12 - lti_kernel
+def lti_kernel(ssm, L):
+    # Obtain the time-invariant discrete recurrence coefficients.
+    a_bar, b_bar = ssm.discrete()
+
+    # Convert tinygrad Tensors to NumPy float32 arrays.
+    a_bar = a_bar.numpy().astype(np.float32)
+    b_bar = b_bar.numpy().astype(np.float32)
+    C = ssm.C.numpy().astype(np.float32)
+
+    # K[c, k] = sum_n C[c, n] * a_bar[c, n]**k * b_bar[c, n].
+    # Each column represents the contribution from one time lag.
+    K = np.empty((ssm.d, L), dtype=np.float32)
+
+    for k in range(L):
+        K[:, k] = np.sum(
+            C * np.power(a_bar, k) * b_bar,
+            axis=1,
+        )
+
+    return K
+
+
+def lti_conv(ssm, x):
+    # Convert the input to a NumPy float32 array.
+    # Expected shape: (batch, L, d).
+    x = np.asarray(x, dtype=np.float32)
+    batch, L, d = x.shape
+
+    # Compute the fixed convolution kernel and skip parameter.
+    K = lti_kernel(ssm, L)
+    D = ssm.D.numpy().astype(np.float32)
+
+    # Initialize the convolution output.
+    y = np.zeros((batch, L, d), dtype=np.float32)
+
+    # Apply causal convolution:
+    # y_t = sum_{k=0}^t K[:, k] * x_{t-k} + D * x_t.
+    for t in range(L):
+        for k in range(t + 1):
+            y[:, t, :] += x[:, t - k, :] * K[:, k]
+
+    # Add the channel-wise skip connection.
+    y += x * D.reshape(1, 1, d)
+
+    return y
+
