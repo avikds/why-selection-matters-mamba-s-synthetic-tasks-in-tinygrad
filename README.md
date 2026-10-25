@@ -27,6 +27,7 @@ python scaffold.py
 - [x] **15.** MixerBlock
 - [x] **16.** SelectionModel
 - [x] **17.** masked_cross_entropy
+- [x] **18.** train_model
 
 ---
 
