@@ -531,3 +531,60 @@ class CausalSelfAttention:
 
         return out
 
+# Step 15 - MixerBlock
+def rms_norm(x, eps=1e-5):
+    # Root-mean-square normalization over the final feature dimension.
+    mean_square = (x * x).mean(axis=-1, keepdim=True)
+    return x / (mean_square + eps).sqrt()
+
+
+class MixerBlock:
+    def __init__(self, d_model, kind, rng, d_state=8, expand=2, dt_rank=4):
+        # Store the mixer type and model dimension.
+        self.kind = kind
+        self.d_model = d_model
+
+        if kind in ("lti", "s6"):
+            # Expand the model dimension before applying the SSM.
+            d_inner = expand * d_model
+
+            # Build components in the required initialization order.
+            self.in_proj = Dense(d_model, d_inner, rng)
+
+            if kind == "lti":
+                self.mixer = LTISSM(d_inner, d_state, rng)
+            else:
+                self.mixer = S6(d_inner, d_state, dt_rank, rng)
+
+            self.out_proj = Dense(d_inner, d_model, rng)
+
+        elif kind == "attn":
+            # Attention has its own query, key, value, and output projections.
+            self.mixer = CausalSelfAttention(d_model, rng)
+
+        else:
+            raise ValueError(
+                f"Unsupported mixer kind: {kind!r}. "
+                "Expected 'lti', 's6', or 'attn'."
+            )
+
+    def __call__(self, x):
+        # Pre-normalize the input before applying the mixer.
+        x_norm = rms_norm(x)
+
+        if self.kind in ("lti", "s6"):
+            # Project to the inner dimension, then apply SiLU:
+            # SiLU(z) = z * sigmoid(z).
+            z = self.in_proj(x_norm)
+            z = z * z.sigmoid()
+
+            # Apply the state space mixer and project back to d_model.
+            z = self.mixer(z)
+            z = self.out_proj(z)
+
+            # Residual connection.
+            return x + z
+
+        # Attention operates directly at the model dimension.
+        return x + self.mixer(x_norm)
+
