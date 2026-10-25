@@ -671,37 +671,52 @@ def train_model(model, make_batch, vocab, steps=300, lr=3e-3, batch_size=64, see
     # Initialize Adam using all trainable parameters in the model.
     opt = nn.optim.Adam(get_parameters(model), lr=lr)
 
-    # Compile the training step with TinyJit.
-    @TinyJit
-    def step(inputs, targets):
-        with Tensor.train():
-            # Clear gradients from the previous optimization step.
-            opt.zero_grad()
+    # Define the core optimization operation.
+    def optimization_step(inputs, targets):
+        opt.zero_grad()
 
-            # Forward pass and masked cross-entropy loss.
-            loss = masked_cross_entropy(model(inputs), targets)
+        # Forward pass and masked cross-entropy loss.
+        loss = masked_cross_entropy(model(inputs), targets)
 
-            # Backpropagation and Adam parameter update.
-            loss.backward()
-            opt.step()
+        # Backpropagation and Adam parameter update.
+        loss.backward()
+        opt.step()
 
-            # Return the realized scalar loss.
-            return loss.realize()
+        return loss.realize()
+
+    # Support both legacy and newer tinygrad training APIs.
+    if hasattr(Tensor, "train"):
+        # Legacy API: used by environments supporting Tensor.train().
+        @TinyJit
+        def step(inputs, targets):
+            with Tensor.train():
+                return optimization_step(inputs, targets)
+    else:
+        # Newer API: Tensor.train() was removed in tinygrad 0.14.0.
+        from tinygrad import Context
+
+        @TinyJit
+        @Context(TRAINING=1)
+        def step(inputs, targets):
+            return optimization_step(inputs, targets)
 
     losses = []
 
     for s in range(steps):
         # Generate a reproducible batch using the prescribed seed schedule.
-        x, y, mask = make_batch(batch_size, seed * 100_000 + s)
+        x, y, mask = make_batch(
+            batch_size,
+            seed * 100_000 + s,
+        )
 
-        # Encode token IDs and masked targets as float32 one-hot arrays.
+        # Encode token IDs and masked targets.
         inputs, targets = encode_batch(x, y, mask, vocab)
 
         # Realize the input tensors before passing them to the JIT step.
         inputs_tensor = Tensor(inputs).realize()
         targets_tensor = Tensor(targets).realize()
 
-        # Execute the compiled optimization step and record its loss.
+        # Execute the compiled step and record the scalar loss.
         loss = step(inputs_tensor, targets_tensor)
         losses.append(float(loss.item()))
 
