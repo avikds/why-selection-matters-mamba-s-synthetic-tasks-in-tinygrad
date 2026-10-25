@@ -667,44 +667,41 @@ def masked_cross_entropy(logits, targets):
     return negative_log_likelihood / n_answers
 
 # Step 18 - train_model
-import numpy as np
-from tinygrad import Tensor, TinyJit, nn
-from tinygrad.nn.state import get_parameters
-
-
 def train_model(model, make_batch, vocab, steps=300, lr=3e-3, batch_size=64, seed=0):
-    # Initialize Adam over all trainable model parameters.
+    # Initialize Adam using all trainable parameters in the model.
     opt = nn.optim.Adam(get_parameters(model), lr=lr)
 
     # Compile the training step with TinyJit.
     @TinyJit
     def step(inputs, targets):
-        # Clear gradients before computing the next update.
-        opt.zero_grad()
+        with Tensor.train():
+            # Clear gradients from the previous optimization step.
+            opt.zero_grad()
 
-        # Forward pass and masked cross-entropy loss.
-        loss = masked_cross_entropy(model(inputs), targets)
+            # Forward pass and masked cross-entropy loss.
+            loss = masked_cross_entropy(model(inputs), targets)
 
-        # Backpropagation and optimizer update.
-        loss.backward()
-        opt.step()
+            # Backpropagation and Adam parameter update.
+            loss.backward()
+            opt.step()
 
-        return loss.realize()
+            # Return the realized scalar loss.
+            return loss.realize()
 
     losses = []
 
     for s in range(steps):
-        # Generate a reproducible batch.
+        # Generate a reproducible batch using the prescribed seed schedule.
         x, y, mask = make_batch(batch_size, seed * 100_000 + s)
 
-        # Encode inputs and masked targets as float32 one-hot arrays.
+        # Encode token IDs and masked targets as float32 one-hot arrays.
         inputs, targets = encode_batch(x, y, mask, vocab)
 
-        # Realize the input tensors before passing them to TinyJit.
+        # Realize the input tensors before passing them to the JIT step.
         inputs_tensor = Tensor(inputs).realize()
         targets_tensor = Tensor(targets).realize()
 
-        # Execute one optimization step and record its loss.
+        # Execute the compiled optimization step and record its loss.
         loss = step(inputs_tensor, targets_tensor)
         losses.append(float(loss.item()))
 
