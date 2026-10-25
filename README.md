@@ -20,6 +20,7 @@ python scaffold.py
 - [x] **8.** Dense
 - [x] **9.** ssm_init
 - [x] **10.** discretize
+- [x] **11.** LTISSM
 
 ---
 

@@ -297,3 +297,67 @@ def discretize(delta, A, B, method="euler"):
 
     return a_bar, b_bar
 
+# Step 11 - LTISSM
+class LTISSM:
+    def __init__(self, d, n, rng, dt_min=0.001, dt_max=0.1):
+        # Initialize the SSM parameters first, preserving the required RNG draw order.
+        p = ssm_init(rng, d, n, dt_min, dt_max)
+
+        # Draw B and C from the seeded NumPy generator.
+        B = rng.normal(0.0, 1.0, size=(d, n)).astype(np.float32)
+        C = (
+            rng.normal(0.0, 1.0, size=(d, n)) / math.sqrt(n)
+        ).astype(np.float32)
+
+        # Store all model parameters as float32 tinygrad Tensors.
+        self.A_log = Tensor(p["A_log"].astype(np.float32))
+        self.dt = Tensor(p["dt_bias"].astype(np.float32))
+        self.B = Tensor(B)
+        self.C = Tensor(C)
+        self.D = Tensor(p["D"].astype(np.float32))
+
+        self.d = d
+        self.n = n
+
+    def discrete(self):
+        # Recover the continuous-time diagonal state matrix:
+        # A = -exp(A_log).
+        A = -self.A_log.exp()
+
+        # Recover positive step sizes using softplus.
+        # Shape: (d,).
+        delta = self.dt.softplus()
+
+        # Apply Euler discretization with broadcasting over state dimensions.
+        # Both returned tensors have shape (d, n).
+        a_bar, b_bar = discretize(delta[:, None], A, self.B)
+
+        return a_bar, b_bar
+
+    def __call__(self, x):
+        # Input x has shape (batch, L, d).
+        batch, seq_len, d = x.shape
+
+        # Obtain the time-invariant discrete recurrence coefficients.
+        a_bar, b_bar = self.discrete()
+
+        # Expand a_bar across batch and sequence dimensions.
+        # Shape: (batch, L, d, n).
+        a = a_bar.reshape(1, 1, d, self.n).expand(
+            batch, seq_len, d, self.n
+        )
+
+        # The input-dependent forcing term is b_bar * x_t.
+        # Shape: (batch, L, d, n).
+        b = b_bar * x.reshape(batch, seq_len, d, 1)
+
+        # Compute every recurrent state with the differentiable
+        # associative scan implemented in Part 2.
+        h = associative_scan(a, b)
+
+        # Read out the states and add the per-channel skip connection:
+        # y_t = sum_n(C * h_t) + D * x_t.
+        y = (h * self.C).sum(axis=-1) + self.D * x
+
+        return y
+
