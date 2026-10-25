@@ -83,3 +83,19 @@ def induction_heads_batch(n, seed, seq_len=20, n_vocab=16):
         mask,
     )
 
+# Step 3 - encode_batch
+def encode_batch(x, y, mask, vocab):
+    # Convert token IDs into one-hot input vectors.
+    # Shape: (n, L, vocab), dtype: float32.
+    inputs = np.eye(vocab, dtype=np.float32)[x]
+
+    # Convert target token IDs into one-hot vectors.
+    # Shape: (n, L, vocab), dtype: float32.
+    targets = np.eye(vocab, dtype=np.float32)[y]
+
+    # Zero out target vectors at positions that are not answers.
+    # Expanding mask adds a final dimension for broadcasting.
+    targets *= mask[..., None].astype(np.float32)
+
+    return inputs, targets
+

@@ -12,6 +12,7 @@ python scaffold.py
 
 - [x] **1.** selective_copying_batch
 - [x] **2.** induction_heads_batch
+- [x] **3.** encode_batch
 
 ---
 
