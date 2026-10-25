@@ -99,3 +99,27 @@ def encode_batch(x, y, mask, vocab):
 
     return inputs, targets
 
+# Step 4 - masked_accuracy
+def masked_accuracy(logits, y, mask):
+    # Convert a tinygrad Tensor to a NumPy array when necessary.
+    if hasattr(logits, "numpy"):
+        logits = logits.numpy()
+
+    # Predict the token with the highest logit at each sequence position.
+    predictions = np.argmax(logits, axis=-1)
+
+    # Ensure the mask is Boolean.
+    mask = np.asarray(mask, dtype=bool)
+
+    # Return 0.0 when there are no positions to evaluate.
+    if not np.any(mask):
+        return 0.0
+
+    # Compare predictions with the expected token IDs only at
+    # positions where the task requires an answer.
+    correct = predictions[mask] == np.asarray(y)[mask]
+
+    # Return the fraction of correctly predicted answer positions
+    # as a standard Python float.
+    return float(np.mean(correct))
+
