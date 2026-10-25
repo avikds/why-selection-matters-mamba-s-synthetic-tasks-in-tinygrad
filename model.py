@@ -1013,3 +1013,71 @@ def s6_decode_step(ssm, x_t, h):
 
     return y_t, h_new
 
+# Step 24 - model_decode
+def model_decode(model, inputs):
+    # Recurrent decoding is implemented only for selective S6 models.
+    if model.kind != "s6":
+        raise ValueError("model_decode requires a model with kind='s6'")
+
+    # Ensure inputs are a float32 NumPy array of shape (batch, L, vocab).
+    inputs = np.asarray(inputs, dtype=np.float32)
+    batch, seq_len, _ = inputs.shape
+
+    # Initialize one fixed-size recurrent state for every S6 block.
+    # Each state has shape (batch, d_inner, d_state).
+    states = []
+    for block in model.blocks:
+        d_inner, d_state = block.mixer.A_log.shape
+        state = Tensor.zeros((batch, d_inner, d_state)).realize()
+        states.append(state)
+
+    # The per-token vocabulary logits will be collected here.
+    logits_list = []
+
+    # Process one token position at a time.
+    for t in range(seq_len):
+        # Embed the current one-hot token.
+        # Shape: (batch, d_model).
+        x_t = Tensor(inputs[:, t, :]) @ model.embed
+
+        # Advance through each S6 residual block in recurrent mode.
+        for i, block in enumerate(model.blocks):
+            # Match the parallel block's pre-norm, projection, and SiLU.
+            u = block.in_proj(rms_norm(x_t))
+            u = u * u.sigmoid()
+
+            # Advance this layer's state by one token.
+            y_t, new_state = s6_decode_step(
+                block.mixer,
+                u,
+                states[i],
+            )
+
+            # Realize and retain the updated state for the next position.
+            states[i] = new_state.realize()
+
+            # Apply the output projection and residual connection.
+            x_t = x_t + block.out_proj(y_t)
+
+        # Compute vocabulary logits for this token position.
+        token_logits = model.head(rms_norm(x_t))
+        logits_list.append(token_logits.numpy())
+
+    # Stack per-token logits into shape (batch, L, vocab).
+    if logits_list:
+        logits = np.stack(logits_list, axis=1).astype(np.float32, copy=False)
+    else:
+        logits = np.empty(
+            (batch, 0, model.vocab),
+            dtype=np.float32,
+        )
+
+    # Count the floats retained by all recurrent states.
+    # This depends on batch size and model dimensions, not sequence length.
+    state_floats = sum(
+        int(np.prod(state.shape))
+        for state in states
+    )
+
+    return logits, state_floats
+
