@@ -1081,3 +1081,33 @@ def model_decode(model, inputs):
 
     return logits, state_floats
 
+# Step 25 - cache_bytes
+def cache_bytes(
+    kind,
+    seq_len,
+    d_model=32,
+    n_layers=2,
+    d_state=8,
+    expand=2,
+    bytes_per=4,
+):
+    # SSM models retain a fixed-size recurrent state per sequence.
+    if kind in ("lti", "s6"):
+        return int(
+            n_layers * expand * d_model * d_state * bytes_per
+        )
+
+    # Attention retains keys and values for every past token,
+    # for every layer.
+    elif kind == "attn":
+        return int(
+            n_layers * 2 * seq_len * d_model * bytes_per
+        )
+
+    # Reject unsupported model kinds.
+    else:
+        raise ValueError(
+            f"Unsupported model kind: {kind!r}. "
+            "Expected 'lti', 's6', or 'attn'."
+        )
+

@@ -34,6 +34,7 @@ python scaffold.py
 - [x] **22.** delta_profile
 - [x] **23.** s6_decode_step
 - [x] **24.** model_decode
+- [x] **25.** cache_bytes
 
 ---
 
