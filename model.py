@@ -273,3 +273,27 @@ def ssm_init(rng, d_inner, d_state, dt_min=0.001, dt_max=0.1):
         "D": D,
     }
 
+# Step 10 - discretize
+def discretize(delta, A, B, method="euler"):
+    # Zero-order hold for the state-transition coefficient:
+    # a_bar = exp(delta * A).
+    a_bar = (delta * A).exp()
+
+    # Discretize B using the selected method.
+    if method == "euler":
+        # First-order Euler discretization: b_bar = delta * B.
+        b_bar = delta * B
+
+    elif method == "zoh":
+        # Exact zero-order-hold discretization:
+        # b_bar = ((exp(delta * A) - 1) / A) * B.
+        b_bar = ((a_bar - 1.0) / A) * B
+
+    else:
+        raise ValueError(
+            f"Unsupported discretization method: {method!r}. "
+            "Use 'euler' or 'zoh'."
+        )
+
+    return a_bar, b_bar
+
