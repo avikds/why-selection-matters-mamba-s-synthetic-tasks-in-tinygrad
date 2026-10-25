@@ -7,7 +7,10 @@ Assembled from your step-by-step solutions.
 import numpy as np
 
 # Step 1 - selective_copying_batch
+import math
 import numpy as np
+from tinygrad import Tensor, TinyJit, nn
+from tinygrad.nn.state import get_parameters
 
 def selective_copying_batch(n, seed, n_ctx=16, n_data=4, n_vocab=16):
     # Initialize a seeded random number generator.
