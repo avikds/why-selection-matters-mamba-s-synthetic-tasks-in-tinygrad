@@ -11,6 +11,7 @@ python scaffold.py
 ## Steps
 
 - [x] **1.** selective_copying_batch
+- [x] **2.** induction_heads_batch
 
 ---
 
