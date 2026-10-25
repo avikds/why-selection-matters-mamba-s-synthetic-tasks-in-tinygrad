@@ -145,3 +145,23 @@ def scan_reference(a, b):
 
     return out
 
+# Step 6 - scan_combine
+SCAN_IDENTITY = (1.0, 0.0)
+
+
+def scan_combine(left, right):
+    # Compose two affine transformations:
+    # left:  h -> a1 * h + b1
+    # right: h -> a2 * h + b2
+    #
+    # Applying left first and then right gives:
+    # h -> a2 * (a1 * h + b1) + b2
+    #   = (a1 * a2) * h + (a2 * b1 + b2)
+
+    a1, b1 = left
+    a2, b2 = right
+
+    # Use only multiplication and addition so the operation supports
+    # Python scalars, NumPy arrays, and tinygrad Tensors.
+    return a1 * a2, a2 * b1 + b2
+

@@ -15,6 +15,7 @@ python scaffold.py
 - [x] **3.** encode_batch
 - [x] **4.** masked_accuracy
 - [x] **5.** scan_reference
+- [x] **6.** scan_combine
 
 ---
 
