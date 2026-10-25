@@ -32,6 +32,7 @@ python scaffold.py
 - [x] **20.** selective_copying_study
 - [x] **21.** induction_extrapolation
 - [x] **22.** delta_profile
+- [x] **23.** s6_decode_step
 
 ---
 

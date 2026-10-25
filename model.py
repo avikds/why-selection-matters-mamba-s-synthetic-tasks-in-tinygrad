@@ -974,3 +974,42 @@ def delta_profile(model, x, trigger):
 
     return profiles
 
+# Step 23 - s6_decode_step
+def s6_decode_step(ssm, x_t, h):
+    # x_t has shape (batch, d).
+    # h has shape (batch, d, n).
+
+    batch, d = x_t.shape
+
+    # Compute input-dependent selection parameters for this single position.
+    # selection expects (batch, L, d), so use L = 1.
+    delta, Bt, Ct = ssm.selection(x_t.reshape(batch, 1, d))
+
+    # Remove the length-one sequence dimension.
+    # delta: (batch, d)
+    # Bt, Ct: (batch, n)
+    delta = delta[:, 0, :]
+    Bt = Bt[:, 0, :]
+    Ct = Ct[:, 0, :]
+
+    # Continuous-time diagonal state matrix: A = -exp(A_log).
+    A = -ssm.A_log.exp()
+
+    # Zero-order hold for A:
+    # a_bar = exp(delta * A).
+    a_bar = (delta[..., None] * A).exp()
+
+    # Euler discretization for B, combined with the current input:
+    # b_bar * x_t = delta * Bt * x_t.
+    b = delta[..., None] * Bt[:, None, :] * x_t[..., None]
+
+    # Update the recurrent state:
+    # h_new = a_bar * h + b.
+    h_new = a_bar * h + b
+
+    # Read out the new state using input-dependent C and add the skip:
+    # y_t = sum_n(C_t * h_new) + D * x_t.
+    y_t = (Ct[:, None, :] * h_new).sum(axis=-1) + ssm.D * x_t
+
+    return y_t, h_new
+
