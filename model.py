@@ -668,57 +668,59 @@ def masked_cross_entropy(logits, targets):
 
 # Step 18 - train_model
 def train_model(model, make_batch, vocab, steps=300, lr=3e-3, batch_size=64, seed=0):
+    from contextlib import nullcontext
+
     # Initialize Adam using all trainable parameters in the model.
     opt = nn.optim.Adam(get_parameters(model), lr=lr)
 
-    # Define the core optimization operation.
-    def optimization_step(inputs, targets):
-        opt.zero_grad()
-
-        # Forward pass and masked cross-entropy loss.
-        loss = masked_cross_entropy(model(inputs), targets)
-
-        # Backpropagation and Adam parameter update.
-        loss.backward()
-        opt.step()
-
-        return loss.realize()
-
-    # Support both legacy and newer tinygrad training APIs.
+    # Use the training API supported by the installed tinygrad version.
     if hasattr(Tensor, "train"):
-        # Legacy API: used by environments supporting Tensor.train().
+        # Legacy API, as specified in the Deep-ML instructions.
+        training_context = nullcontext()
+
         @TinyJit
         def step(inputs, targets):
             with Tensor.train():
-                return optimization_step(inputs, targets)
+                opt.zero_grad()
+                loss = masked_cross_entropy(model(inputs), targets)
+                loss.backward()
+                opt.step()
+                return loss.realize()
+
     else:
-        # Newer API: Tensor.train() was removed in tinygrad 0.14.0.
+        # Newer API: use Context to enable training mode.
         from tinygrad import Context
+        training_context = Context(TRAINING=1)
 
         @TinyJit
-        @Context(TRAINING=1)
         def step(inputs, targets):
-            return optimization_step(inputs, targets)
+            opt.zero_grad()
+            loss = masked_cross_entropy(model(inputs), targets)
+            loss.backward()
+            opt.step()
+            return loss.realize()
 
     losses = []
 
-    for s in range(steps):
-        # Generate a reproducible batch using the prescribed seed schedule.
-        x, y, mask = make_batch(
-            batch_size,
-            seed * 100_000 + s,
-        )
+    # In newer tinygrad versions, keep training mode active around
+    # the TinyJit calls, including the initial tracing calls.
+    with training_context:
+        for s in range(steps):
+            # Generate a reproducible batch.
+            x, y, mask = make_batch(
+                batch_size,
+                seed * 100_000 + s,
+            )
 
-        # Encode token IDs and masked targets.
-        inputs, targets = encode_batch(x, y, mask, vocab)
+            # Encode inputs and masked targets.
+            inputs, targets = encode_batch(x, y, mask, vocab)
 
-        # Realize the input tensors before passing them to the JIT step.
-        inputs_tensor = Tensor(inputs).realize()
-        targets_tensor = Tensor(targets).realize()
+            inputs_tensor = Tensor(inputs).realize()
+            targets_tensor = Tensor(targets).realize()
 
-        # Execute the compiled step and record the scalar loss.
-        loss = step(inputs_tensor, targets_tensor)
-        losses.append(float(loss.item()))
+            # Run the training step and store a Python float.
+            loss = step(inputs_tensor, targets_tensor)
+            losses.append(float(loss.item()))
 
     return losses
 
