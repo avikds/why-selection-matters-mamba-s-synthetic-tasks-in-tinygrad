@@ -704,3 +704,39 @@ def train_model(model, make_batch, vocab, steps=300, lr=3e-3, batch_size=64, see
 
     return losses
 
+# Step 19 - evaluate
+def evaluate(model, x, y, mask, vocab, chunk=64):
+    # Track the number of correct predictions and total answer positions.
+    correct = 0
+    total = 0
+
+    # Process the dataset in consecutive chunks to bound memory usage.
+    for start in range(0, len(x), chunk):
+        end = min(start + chunk, len(x))
+
+        # Encode this chunk into float32 one-hot input and target arrays.
+        inputs, _ = encode_batch(
+            x[start:end],
+            y[start:end],
+            mask[start:end],
+            vocab,
+        )
+
+        # Run the model without JIT compilation or explicit gradient computation.
+        logits = model(Tensor(inputs))
+
+        # Convert logits to NumPy and select the most likely token at each position.
+        predictions = np.argmax(logits.numpy(), axis=-1)
+
+        # Only positions marked True contribute to accuracy.
+        chunk_y = y[start:end]
+        chunk_mask = mask[start:end].astype(bool)
+
+        correct += int(np.sum(
+            (predictions == chunk_y) & chunk_mask
+        ))
+        total += int(np.sum(chunk_mask))
+
+    # Return answer-position accuracy as a Python float.
+    return float(correct / total) if total > 0 else 0.0
+
