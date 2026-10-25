@@ -1111,3 +1111,250 @@ def cache_bytes(
             "Expected 'lti', 's6', or 'attn'."
         )
 
+# Step 26 - selection_report
+STUDY_VOCAB = 18
+STUDY_MAX_LEN = 160
+
+
+def _s6_decode_step_rank_preserving(ssm, x_t, h):
+    """
+    Advance one S6 token while retaining a length-one sequence axis.
+
+    x_t: (batch, 1, d)
+    h:   (batch, d, n)
+    """
+    batch, seq_len, d = x_t.shape
+
+    if seq_len != 1:
+        raise ValueError("Expected exactly one token per decode step")
+
+    # Use the same selection and discretization shapes as S6.__call__.
+    delta, Bt, Ct = ssm.selection(x_t)
+    A = -ssm.A_log.exp()
+
+    a_bar, b_bar = discretize(
+        delta[..., None],
+        A,
+        Bt[:, :, None, :],
+        method="euler",
+    )
+
+    # Retain the singleton sequence axis during the state update.
+    h_new = (
+        a_bar * h[:, None, :, :]
+        + b_bar * x_t[..., None]
+    )
+
+    # Input-dependent readout plus the skip connection.
+    y_t = (
+        h_new * Ct[:, :, None, :]
+    ).sum(axis=-1) + ssm.D * x_t
+
+    # Return the output with its sequence axis and the updated state.
+    return y_t, h_new[:, 0, :, :]
+
+
+def _model_decode_rank_preserving(model, inputs):
+    """Run an S6 SelectionModel recurrently, one token at a time."""
+    if model.kind != "s6":
+        raise ValueError("Recurrent decoding requires kind='s6'")
+
+    inputs = np.asarray(inputs, dtype=np.float32)
+    batch, seq_len, vocab = inputs.shape
+
+    # Allocate one fixed-size recurrent state per S6 layer.
+    states = []
+    for block in model.blocks:
+        d_inner, d_state = block.mixer.A_log.shape
+        states.append(
+            Tensor.zeros((batch, d_inner, d_state)).realize()
+        )
+
+    logits_by_position = []
+
+    for t in range(seq_len):
+        # Embed one token, retaining shape (batch, 1, d_model).
+        x_t = Tensor(inputs[:, t:t + 1, :]) @ model.embed
+
+        for i, block in enumerate(model.blocks):
+            # Match the block's parallel pre-norm input path.
+            u = block.in_proj(rms_norm(x_t))
+            u = u * u.sigmoid()
+
+            # Advance the S6 state by one position.
+            y_t, new_state = _s6_decode_step_rank_preserving(
+                block.mixer,
+                u,
+                states[i],
+            )
+
+            # Realize the updated state before the next token.
+            states[i] = new_state.realize()
+
+            # Apply the outer residual connection.
+            x_t = x_t + block.out_proj(y_t)
+
+        # Compute this position's vocabulary logits.
+        token_logits = model.head(rms_norm(x_t))
+        logits_by_position.append(token_logits.numpy()[:, 0, :])
+
+    if seq_len:
+        logits = np.stack(logits_by_position, axis=1).astype(
+            np.float32, copy=False
+        )
+    else:
+        logits = np.empty((batch, 0, model.vocab), dtype=np.float32)
+
+    state_floats = sum(
+        int(np.prod(state.shape))
+        for state in states
+    )
+
+    return logits, int(state_floats)
+
+
+def selection_report(
+    seed=0,
+    steps=300,
+    sc_kinds=("lti", "s6", "attn"),
+    mults=(1, 2, 4, 8),
+    n_eval=128,
+):
+    # Use three consecutive seeds for the experiment.
+    seeds = (seed, seed + 1, seed + 2)
+
+    # ---------------------------------------------------------
+    # 1. Selective Copying experiment.
+    # ---------------------------------------------------------
+    sc_acc, _ = selective_copying_study(
+        kinds=sc_kinds,
+        seeds=seeds,
+        steps=steps,
+        batch_size=64,
+        lr=3e-3,
+        n_ctx=16,
+        n_data=4,
+        n_vocab=16,
+        d_model=32,
+        n_eval=n_eval,
+    )
+
+    selective_copying = {
+        kind: float(np.mean(scores))
+        for kind, scores in sc_acc.items()
+    }
+
+    # ---------------------------------------------------------
+    # 2. Induction Heads length extrapolation.
+    # ---------------------------------------------------------
+    ind_acc, ind_models = induction_extrapolation(
+        kinds=("s6", "attn"),
+        seeds=seeds,
+        steps=steps,
+        batch_size=64,
+        lr=3e-3,
+        train_len=20,
+        mults=mults,
+        n_vocab=16,
+        d_model=32,
+        n_eval=n_eval,
+    )
+
+    induction = {
+        kind: {
+            int(mult): float(np.mean(scores))
+            for mult, scores in values.items()
+        }
+        for kind, values in ind_acc.items()
+    }
+
+    # ---------------------------------------------------------
+    # 3. Measure where the trained S6 layer selects.
+    # ---------------------------------------------------------
+    s6_model = ind_models["s6"][0]
+
+    probe_x, _, _ = induction_heads_batch(
+        max(1, n_eval),
+        10**7 + seed,
+        seq_len=20,
+        n_vocab=16,
+    )
+
+    profile = delta_profile(
+        s6_model,
+        probe_x,
+        trigger=16,
+    )
+
+    delta_profile_result = [
+        {
+            name: float(value)
+            for name, value in layer.items()
+        }
+        for layer in profile
+    ]
+
+    # ---------------------------------------------------------
+    # 4. Compare parallel and recurrent S6 inference.
+    # ---------------------------------------------------------
+    decode_batch = min(8, max(1, n_eval))
+
+    decode_x, decode_y, decode_mask = induction_heads_batch(
+        decode_batch,
+        10**7 + seed + 1,
+        seq_len=20,
+        n_vocab=16,
+    )
+
+    decode_inputs, _ = encode_batch(
+        decode_x,
+        decode_y,
+        decode_mask,
+        STUDY_VOCAB,
+    )
+
+    # Parallel evaluation of the full sequence.
+    parallel_logits = s6_model(Tensor(decode_inputs)).numpy()
+
+    # Recurrent evaluation, one token at a time.
+    recurrent_logits, state_floats = _model_decode_rank_preserving(
+        s6_model,
+        decode_inputs,
+    )
+
+    max_abs_diff = float(
+        np.max(np.abs(parallel_logits - recurrent_logits))
+    )
+
+    decode = {
+        "state_floats": int(state_floats),
+        "max_abs_diff": max_abs_diff,
+    }
+
+    # ---------------------------------------------------------
+    # 5. Compare per-sequence S6 state memory with attention KV.
+    # ---------------------------------------------------------
+    cache_lengths = {
+        20,
+        160,
+        1280,
+        10240,
+        *(20 * int(mult) for mult in mults),
+    }
+
+    cache_table = {
+        length: {
+            "s6": int(cache_bytes("s6", length)),
+            "attn": int(cache_bytes("attn", length)),
+        }
+        for length in sorted(cache_lengths)
+    }
+
+    return {
+        "cache_bytes": cache_table,
+        "decode": decode,
+        "delta_profile": delta_profile_result,
+        "induction": induction,
+        "selective_copying": selective_copying,
+    }
+

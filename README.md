@@ -35,6 +35,7 @@ python scaffold.py
 - [x] **23.** s6_decode_step
 - [x] **24.** model_decode
 - [x] **25.** cache_bytes
+- [x] **26.** selection_report
 
 ---
 
