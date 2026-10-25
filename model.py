@@ -488,3 +488,46 @@ class S6:
 
         return y
 
+# Step 14 - CausalSelfAttention
+class CausalSelfAttention:
+    def __init__(self, d, rng):
+        # Initialize query, key, value, and output projections in the
+        # required order using the seeded random number generator.
+        self.q = Dense(d, d, rng)
+        self.k = Dense(d, d, rng)
+        self.v = Dense(d, d, rng)
+        self.o = Dense(d, d, rng)
+
+        self.d = d
+
+    def __call__(self, x):
+        # Input shape: (batch, L, d).
+        batch, L, d = x.shape
+
+        # Compute query, key, and value representations.
+        q = self.q(x)
+        k = self.k(x)
+        v = self.v(x)
+
+        # Scaled dot-product attention scores:
+        # scores[b, i, j] = q[b, i] dot k[b, j] / sqrt(d).
+        scores = (q @ k.transpose(1, 2)) / math.sqrt(self.d)
+
+        # Construct a causal keep mask: position j can attend to
+        # position i only when j <= i. The lower triangle includes
+        # the diagonal, so each position can attend to itself.
+        keep = Tensor.ones((L, L)).tril()
+
+        # Replace scores at future positions with a large negative
+        # number so their softmax probabilities become approximately zero.
+        scores = keep.where(scores, -1e9)
+
+        # Normalize attention scores over the key-position axis.
+        weights = scores.softmax(axis=-1)
+
+        # Combine value vectors using attention weights, then apply
+        # the output projection.
+        out = self.o(weights @ v)
+
+        return out
+
